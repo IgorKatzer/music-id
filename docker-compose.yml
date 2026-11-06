@@ -1,0 +1,61 @@
+# Local development environment: `docker compose up`
+# - web:    http://localhost:5173 (React + Vite)
+# - api:    http://localhost:8000 (FastAPI; docs at /docs)
+# - worker: audio-processing process (placeholder until the queue ADR)
+# - db:     PostgreSQL on localhost:5432
+
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-musicid}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-musicid}
+      POSTGRES_DB: ${POSTGRES_DB:-musicid}
+    ports:
+      - "5432:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-musicid}"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  api:
+    build: ./backend
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-musicid}:${POSTGRES_PASSWORD:-musicid}@db:5432/${POSTGRES_DB:-musicid}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    depends_on:
+      db:
+        condition: service_healthy
+
+  worker:
+    build: ./backend
+    command: python -m app.worker
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-musicid}:${POSTGRES_PASSWORD:-musicid}@db:5432/${POSTGRES_DB:-musicid}
+    volumes:
+      - ./backend:/app
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build: ./apps/web
+    environment:
+      API_URL: http://api:8000
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./apps/web:/app
+      - /app/node_modules
+    depends_on:
+      - api
+
+volumes:
+  db-data:
